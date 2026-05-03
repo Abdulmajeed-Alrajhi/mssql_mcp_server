@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import quote, unquote
 import pymssql
 from mcp.server import Server
 from mcp.types import Resource, Tool, TextContent
@@ -363,11 +364,17 @@ async def list_resources() -> list[Resource]:
 
             for table in tables:
                 if multi:
-                    uri = f"mssql://{conn_name}/{table[0]}/data"
+                    # Percent-encode connection and table names so URIs containing
+                    # spaces or other characters illegal in the URI host/path stay
+                    # valid (pydantic AnyUrl rejects raw spaces in the authority).
+                    uri = (
+                        f"mssql://{quote(conn_name, safe='')}"
+                        f"/{quote(table[0], safe='')}/data"
+                    )
                     label = f"[{conn_name}] Table: {table[0]}"
                     desc = f"Data in table {table[0]} on connection '{conn_name}'"
                 else:
-                    uri = f"mssql://{table[0]}/data"
+                    uri = f"mssql://{quote(table[0], safe='')}/data"
                     label = f"Table: {table[0]}"
                     desc = f"Data in table: {table[0]}"
 
@@ -406,14 +413,16 @@ async def read_resource(uri: AnyUrl) -> str:
 
     if multi:
         # mssql://<connection>/<table>/data  →  parts = [conn, table, "data"]
+        # Connection and table names are percent-encoded by list_resources,
+        # so decode them before routing/lookup.
         if len(parts) < 2:
             raise ValueError(f"Invalid multi-host URI: {uri_str}")
-        conn_name = parts[0]
-        table = parts[1]
+        conn_name = unquote(parts[0])
+        table = unquote(parts[1])
         config = get_connection_config(conn_name)
     else:
         # mssql://<table>/data  →  parts = [table, "data"]
-        table = parts[0]
+        table = unquote(parts[0])
         config = get_db_config()
 
     try:
